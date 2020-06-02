@@ -57,13 +57,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(
-        handle: Handle,
-        base_url: Url,
-        stream: IS,
-        irc_server_name: String,
-        ctx: ConnectionContext,
-    ) -> Box<dyn Future<Item = Bridge<IS>, Error = io::Error>> {
+    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<dyn Future<Item=Bridge<IS>, Error=io::Error>> {
         let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
             .and_then(move |mut user_connection| {
                 MatrixClient::login(
@@ -340,13 +334,10 @@ impl MappingStore {
             if let Some(alias) = room.get_state_content_key("m.room.canonical_alias", "", "alias") {
                 alias.into()
             } else if let Some(name) = room.get_name() {
-                let stripped_name: String = name
-                    .chars()
-                    .filter(|c| match *c {
-                        '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-                        _ => true,
-                    })
-                    .collect();
+                let stripped_name: String = name.chars().filter(|c| match *c {
+                    '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                    _ => true,
+                }).collect();
 
                 if !stripped_name.is_empty() {
                     format!("#{}", stripped_name)
@@ -412,22 +403,17 @@ impl MappingStore {
             return nick.clone();
         }
 
-        let mut nick: String = display_name
-            .chars()
-            .filter(|c| match *c {
-                '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-                _ => true,
-            })
-            .collect();
+        let mut nick: String = display_name.chars().filter(|c| match *c {
+            '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+            _ => true,
+        }).collect();
+
 
         if nick.len() < 3 {
-            nick = user_id
-                .chars()
-                .filter(|c| match *c {
-                    '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-                    _ => true,
-                })
-                .collect();
+            nick = user_id.chars().filter(|c| match *c {
+                '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                _ => true,
+            }).collect();
         }
 
         if irc_server.nick_exists(&nick) {

@@ -68,15 +68,16 @@ pub enum IrcCommand {
 impl IrcCommand {
     pub fn from_irc_line(irc_line: IrcLine) -> Option<IrcCommand> {
         match irc_line.command {
-            Command::Nick => irc_line
-                .args
-                .into_iter()
-                .next()
-                .map(|nick| IrcCommand::Nick { nick }),
+            Command::Nick => {
+                irc_line.args.into_iter().next().map(|nick| IrcCommand::Nick { nick })
+            }
             Command::User => {
                 let mut it = irc_line.args.into_iter();
                 if let (Some(user), Some(real_name)) = (it.nth(0), it.nth(2)) {
-                    Some(IrcCommand::User { user, real_name })
+                    Some(IrcCommand::User {
+                        user,
+                        real_name,
+                    })
                 } else {
                     None
                 }
@@ -286,7 +287,7 @@ impl Value for Command {
         &self,
         _record: &Record,
         key: &'static str,
-        serializer: &mut dyn Serializer,
+        serializer: &mut dyn Serializer
     ) -> Result<(), SlogSerError> {
         serializer.emit_str(key, self.to_str())
     }
