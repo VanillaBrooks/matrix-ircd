@@ -19,6 +19,8 @@ use slog::{Record, Serializer, Value};
 
 use pest::{grammar, impl_rdp};
 
+use pest::{grammar, impl_rdp};
+
 use std::convert::From;
 use std::str;
 use std::str::FromStr;

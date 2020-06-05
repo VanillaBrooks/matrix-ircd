@@ -15,13 +15,25 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-// TODO: move this one to `use` format as well. It turns out its actually pretty difficult with
+// TODO: move this one to `use` format as well. It turns out its actually pretty difficult with 
 // ~50 errors and importing the macros in the files still results in errors
 #[macro_use]
 extern crate slog;
 
-use clap::{App, Arg};
+use tokio_core;
+use tokio_tls;
+use slog_async;
+use slog_term;
+use url;
+use lazy_static;
+use clap;
+use tasked_futures;
+use native_tls;
 
+use clap::{Arg, App};
+
+use futures;
+use futures::Future;
 use futures::stream::Stream;
 use futures::Future;
 
@@ -40,6 +52,7 @@ use native_tls::{Identity, TlsAcceptor};
 
 use tasked_futures::TaskExecutor;
 
+
 lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
         let decorator = slog_term::TermDecorator::new().build();
@@ -48,6 +61,7 @@ lazy_static::lazy_static! {
         slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
     };
 }
+
 
 futures::task_local! {
     // A task local context describing the connection (from an IRC client).
@@ -87,17 +101,16 @@ fn main() {
     let matches = App::new("IRC Matrix Daemon")
         .version(clap::crate_version!())
         .author(clap::crate_authors!())
-        .arg(
-            Arg::with_name("BIND")
-                .short("b")
-                .long("bind")
-                .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
-                .takes_value(true)
-                .validator(|addr| {
-                    addr.parse::<SocketAddr>()
-                        .map(|_| ())
-                        .map_err(|err| format!("Invalid bind address: {}", err))
-                }),
+        .arg(Arg::with_name("BIND")
+            .short("b")
+            .long("bind")
+            .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
+            .takes_value(true)
+            .validator(|addr| {
+                addr.parse::<SocketAddr>()
+                .map(|_| ())
+                .map_err(|err| format!("Invalid bind address: {}", err))
+            })
         )
         .arg(
             Arg::with_name("PKCS12")

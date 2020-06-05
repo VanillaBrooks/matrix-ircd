@@ -32,7 +32,7 @@ use futures::{Async, Future, Poll};
 
 use std::io;
 
-use slog::{debug, info, trace};
+use slog::{trace, debug, info};
 
 pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
@@ -269,7 +269,7 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     }
                     IrcCommand::Join { channel } => {
                         if !self.attempt_to_write_join_response(&channel) {
-                            return Ok(Async::Ready(Some(IrcCommand::Join { channel })));
+                            return Ok(Async::Ready(Some(IrcCommand::Join{channel})))
                         }
                     }
                     IrcCommand::Who { matches } => {

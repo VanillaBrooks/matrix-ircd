@@ -39,6 +39,7 @@ use regex::Regex;
 
 use quick_error::quick_error;
 
+
 mod models;
 pub mod protocol;
 mod sync;
@@ -93,20 +94,19 @@ impl MatrixClient {
 
         let mut http_stream = HttpClient::new(host, port, tls, handle.clone());
 
-        let f = do_json_post(
-            "POST",
-            &mut http_stream,
-            &base_url.join("/_matrix/client/r0/login").unwrap(),
-            &protocol::LoginPasswordInput {
-                user,
-                password,
-                login_type: "m.login.password".into(),
-            },
-        )
-        .map_err(move |err| match err {
-            JsonPostError::Io(e) => LoginError::Io(e),
-            JsonPostError::ErrorRepsonse(code) if code == 401 || code == 403 => {
-                LoginError::InvalidPassword
+        let f = do_json_post("POST", &mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
+            user,
+            password,
+            login_type: "m.login.password".into(),
+        }).map_err(move |err| {
+            match err {
+                JsonPostError::Io(e) => LoginError::Io(e),
+                JsonPostError::ErrorRepsonse(code) if code == 401 || code == 403 => {
+                    LoginError::InvalidPassword
+                }
+                JsonPostError::ErrorRepsonse(code) => LoginError::Io(
+                    io::Error::new(io::ErrorKind::Other, format!("Got {} response", code))
+                )
             }
             JsonPostError::ErrorRepsonse(code) => LoginError::Io(io::Error::new(
                 io::ErrorKind::Other,
@@ -139,15 +139,10 @@ impl MatrixClient {
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        let f = do_json_post(
-            "PUT",
-            &mut self.http_stream,
-            &url,
-            &protocol::RoomSendInput {
-                body,
-                msgtype: "m.text".into(),
-            },
-        )
+        let f = do_json_post("PUT", &mut self.http_stream, &url, &protocol::RoomSendInput {
+            body,
+            msgtype: "m.text".into(),
+        })
         .map_err(JsonPostError::into_io_error);
 
         Box::new(f)
@@ -180,12 +175,12 @@ impl MatrixClient {
     }
 
     pub fn media_url(&self, url: &str) -> String {
-        lazy_static::lazy_static! {
+        lazy_static::lazy_static!{
             static ref RE: Regex = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
         }
+        //let re = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
         if let Some(captures) = RE.captures(url) {
-            self.url
-                .join("/_matrix/media/v1/download/")
+            self.url.join("/_matrix/media/v1/download/")
                 .unwrap()
                 .join(&captures[1])
                 .unwrap()
@@ -245,7 +240,7 @@ fn do_json_post<I: Serialize, O: DeserializeOwned + 'static>(method: &'static st
     -> Box<dyn Future<Item=O, Error=JsonPostError>>
 {
     let f = stream.send_request(Request {
-        method: method,
+        method,
         path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
         headers: vec![("Content-Type".into(), "application/json".into())],
         body: serde_json::to_vec(input).expect("input to be valid json"),

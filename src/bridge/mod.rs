@@ -34,7 +34,9 @@ use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use url::Url;
 
-use tasked_futures::{FutureTaskedExt, TaskExecutor, TaskExecutorQueue, TaskedFuture};
+
+use tasked_futures::{TaskExecutorQueue, TaskExecutor, FutureTaskedExt, TaskedFuture};
+
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -69,7 +71,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                 .then(move |res| match res {
                     Ok(matrix_client) => Ok(Bridge {
                         irc_conn: user_connection,
-                        matrix_client,
+                        matrix_client ,
                         ctx,
                         closed: false,
                         mappings: MappingStore::default(),

@@ -305,8 +305,7 @@ impl HttpParser {
             match self.curr_state {
                 HttpStreamState::Headers => {
                     if self.response_buffer.is_empty() {
-                        let num_bytes =
-                            futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                        let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
                             return Err(io::Error::new(
                                 io::ErrorKind::UnexpectedEof,
@@ -368,8 +367,7 @@ impl HttpParser {
                     if let Some(bytes_read) = bytes_read_opt {
                         self.response_buffer.consume(bytes_read);
                     } else {
-                        let num_bytes =
-                            futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                        let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
                             return Err(io::Error::new(
                                 io::ErrorKind::UnexpectedEof,
@@ -397,8 +395,7 @@ impl HttpParser {
                         }
                     }
 
-                    let num_bytes =
-                        futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                    let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                     if num_bytes == 0 {
                         if let HttpStreamState::RawData(None) = self.curr_state {
                             self.curr_state = HttpStreamState::Headers;
@@ -447,8 +444,7 @@ impl HttpParser {
                         }
                     }
 
-                    let num_bytes =
-                        futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                    let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                     if num_bytes == 0 {
                         return Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
@@ -534,7 +530,9 @@ mod tests {
     impl<'a> TestReader<'a> {
         fn new(mut chunks: Vec<Option<&'a [u8]>>) -> TestReader<'a> {
             chunks.reverse();
-            TestReader { chunks }
+            TestReader {
+                chunks,
+            }
         }
     }
 

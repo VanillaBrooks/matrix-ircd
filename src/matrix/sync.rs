@@ -29,6 +29,7 @@ use crate::http::{HttpClient, HttpResponseFuture, Request};
 
 use slog::*;
 
+
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
