@@ -32,7 +32,7 @@ use futures::{Async, Future, Poll};
 
 use std::io;
 
-use slog::{trace, debug, info};
+use slog::{debug, info, trace};
 
 pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
@@ -55,7 +55,11 @@ struct UserNick {
 
 impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<dyn Future<Item=IrcUserConnection<S>, Error=io::Error>> {
+    pub fn await_login(
+        server_name: String,
+        stream: S,
+        ctx: ConnectionContext,
+    ) -> Box<dyn Future<Item = IrcUserConnection<S>, Error = io::Error>> {
         trace!(ctx.logger, "Await login");
         let irc_conn =
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
@@ -269,7 +273,7 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     }
                     IrcCommand::Join { channel } => {
                         if !self.attempt_to_write_join_response(&channel) {
-                            return Ok(Async::Ready(Some(IrcCommand::Join{channel})))
+                            return Ok(Async::Ready(Some(IrcCommand::Join { channel })));
                         }
                     }
                     IrcCommand::Who { matches } => {

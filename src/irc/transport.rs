@@ -25,8 +25,6 @@ use super::protocol::{IrcCommand, Numeric};
 
 use tokio_io::{AsyncRead, AsyncWrite};
 
-
-
 pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
     conn: S,
     read_buffer: Vec<u8>,

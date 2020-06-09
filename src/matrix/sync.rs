@@ -29,7 +29,6 @@ use crate::http::{HttpClient, HttpResponseFuture, Request};
 
 use slog::*;
 
-
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
@@ -80,7 +79,8 @@ impl MatrixSyncClient {
 
                     self.current_sync = Some(http_stream.send_request(Request {
                         method: "GET",
-                        path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
+                        //path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
+                        path: format!("{}?{}", self.url.path(), ""),
                         headers: vec![],
                         body: vec![],
                     }));
@@ -133,5 +133,60 @@ impl Stream for MatrixSyncClient {
 
         let res = futures::try_ready!(self.poll_sync());
         Ok(Async::Ready(Some(res)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MatrixSyncClient;
+    use futures::{Future, Stream};
+    use mockito::mock;
+
+    #[test]
+    fn matrix_sync_request() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let access_token = "sample_access_token";
+        let core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
+        let handle = core.handle();
+
+        let client = MatrixSyncClient::new(handle.clone(), &base_url, access_token.to_string());
+
+        // future for executing the request
+        let runner = futures::lazy(move || {
+            dbg! {"running stream for http request"};
+            client.collect().wait().expect("poll error");
+            Ok(())
+        });
+
+        handle.spawn_send(runner);
+
+        // mocking http requests stuff
+        let mut mockito_url = base_url.clone().join("/_matrix/client/r0/sync").unwrap();
+        // Url that is requested from MatrixSyncClient::poll_sync().
+        // TODO: potentially break out this request into a function for ease of testing
+        let mockito_url = mockito_url
+            .query_pairs_mut()
+            .clear()
+            .append_pair("access_token", access_token)
+            .append_pair("filter", r#"{"presence":{"not_types":["m.presence"]}}"#)
+            .append_pair("timeout", "30000")
+            .finish();
+
+        // We manually have to slice the url for just the ending (including query parameters).
+        // TODO: update to url 2.1.1 and use the native solution instead of string slicing here
+        let mock_req = mock(
+            "GET",
+            mockito_url
+                .as_str()
+                .get(mockito::server_url().len()..)
+                .unwrap(),
+        )
+        .with_status(201)
+        .create();
+
+        // give the executor some time to execute the http request on a thread pool
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        mock_req.assert();
     }
 }
