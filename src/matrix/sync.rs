@@ -177,3 +177,33 @@ impl futures::prelude::Stream for MatrixSyncClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MatrixSyncClient;
+    use futures::stream::StreamExt;
+    use mockito::mock;
+
+    #[tokio::test]
+    async fn matrix_sync_request() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let access_token = "sample_access_token";
+
+        let client = MatrixSyncClient::new(&base_url, access_token.to_string());
+
+        let mock_req = mock("GET", "/_matrix/client/r0/sync?")
+            .with_status(200)
+            .create();
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct, the error is outside the scope of this
+        // test
+        client.into_future().await;
+
+
+        // give the executor some time to execute the http request on a thread pool
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        mock_req.assert();
+    }
+}
