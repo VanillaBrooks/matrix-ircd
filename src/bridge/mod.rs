@@ -140,38 +140,42 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
             }
-            IrcCommand::Join { channel } => {
-                info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
+            IrcCommand::Join { channel_list } => {
+                for channel in channel_list {
+                    info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
-                let join_future =
-                    if let Ok(response) = self.matrix_client.join_room(channel.as_str()).await {
-                        response
+                    
+
+                    let join_future =
+                        if let Ok(response) = self.matrix_client.join_room(channel.as_str()).await {
+                            response
+                        } else {
+                            // TODO: log this
+                            return ();
+                        };
+
+                    let room_id = join_future.room_id;
+
+                    task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
+
+                    if let Some(mapped_channel) = self.mappings.room_id_to_channel(&room_id) {
+                        if mapped_channel == &channel {
+                            // We've already joined this channel, most likely we got the sync
+                            // response before the joined response.
+                            // TODO: Do we wan to send something to IRC?
+                            task_trace!(self.ctx, "Already in IRC channel");
+                        } else {
+                            // We respond to the join with a redirect!
+                            task_trace!(self.ctx, "Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
+                            self.irc_conn
+                                .write_redirect_join(&channel, mapped_channel)
+                                .await;
+                        }
                     } else {
-                        // TODO: log this
-                        return ();
+                        task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.clone());
+                        self.joining_map.insert(room_id, channel);
                     };
-
-                let room_id = join_future.room_id;
-
-                task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
-
-                if let Some(mapped_channel) = self.mappings.room_id_to_channel(&room_id) {
-                    if mapped_channel == &channel {
-                        // We've already joined this channel, most likely we got the sync
-                        // response before the joined response.
-                        // TODO: Do we wan to send something to IRC?
-                        task_trace!(self.ctx, "Already in IRC channel");
-                    } else {
-                        // We respond to the join with a redirect!
-                        task_trace!(self.ctx, "Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
-                        self.irc_conn
-                            .write_redirect_join(&channel, mapped_channel)
-                            .await;
-                    }
-                } else {
-                    task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.clone());
-                    self.joining_map.insert(room_id, channel);
-                };
+                }
             }
             // TODO: Handle PART
             c => {

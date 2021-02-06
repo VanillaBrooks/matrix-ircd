@@ -372,9 +372,12 @@ where
                         self.write_line(&line).await;
                         continue;
                     }
-                    IrcCommand::Join { channel } => {
-                        if !self.attempt_to_write_join_response(&channel).await {
-                            return Poll::Ready(Ok(Some(IrcCommand::Join { channel })));
+                    IrcCommand::Join { channel_list } => {
+                        for channel in &channel_list {
+
+                            if !self.attempt_to_write_join_response(&channel).await {
+                                return Poll::Ready(Ok(Some(IrcCommand::Join { channel_list })));
+                            }
                         }
                     }
                     IrcCommand::Who { matches } => {

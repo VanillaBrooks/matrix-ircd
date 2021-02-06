@@ -33,7 +33,7 @@ pub enum IrcCommand {
         real_name: String,
     },
     Join {
-        channel: String,
+        channel_list: Vec<String>,
     },
     Part {
         channel: String,
@@ -85,7 +85,9 @@ impl IrcCommand {
                 .args
                 .into_iter()
                 .next()
-                .map(|arg| IrcCommand::Join { channel: arg }),
+                .map(|arg| IrcCommand::Join {
+                    channel_list: arg.split(',').map(ToString::to_string).collect(),
+                }),
             Command::Part => irc_line
                 .args
                 .into_iter()
@@ -478,5 +480,24 @@ mod tests {
                 args: vec!["test".into(), "Some text".into()],
             })
         )
+    }
+    #[test]
+    fn single_join() {
+        assert_eq!(
+            parse_irc_line(":example.com JOIN #channel-a"),
+            Some(IrcLine {
+                prefix: Some("example.com".into()),
+                command: Command::PrivMsg,
+                args: vec!["#channel-a".into()]
+            })
+        );
+
+        //assert_eq!(
+        //    ":example.com PRIVMSG #test :Some text".parse().ok(),
+        //    Some(IrcCommand::PrivMsg {
+        //        channel: "#test".into(),
+        //        text: "Some text".into(),
+        //    })
+        //);
     }
 }
