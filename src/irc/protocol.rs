@@ -81,11 +81,14 @@ impl IrcCommand {
                     None
                 }
             }
-            Command::Join => irc_line
-                .args
-                .into_iter()
-                .next()
-                .map(|arg| IrcCommand::Join { channel: arg }),
+            Command::Join => {
+                dbg! {&irc_line};
+                irc_line
+                    .args
+                    .into_iter()
+                    .next()
+                    .map(|arg| IrcCommand::Join { channel: arg })
+            }
             Command::Part => irc_line
                 .args
                 .into_iter()

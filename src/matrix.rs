@@ -88,6 +88,7 @@ pub struct MatrixClient {
             >,
         >,
     >,
+    next_token: Option<String>,
 }
 
 unsafe impl Sync for MatrixClient {}
@@ -106,6 +107,7 @@ impl MatrixClient {
             user_id,
             url,
             stream: None,
+            next_token: None,
         }
     }
 
@@ -198,7 +200,10 @@ impl MatrixClient {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Option<Result<SyncResponse, Error>>> {
+        let logger = self.ctx.logger.clone();
         if let Some(stream) = &mut self.stream {
+            //debug!(logger, "polling matrix sync stream");
+
             let resp = match stream.as_mut().poll_next(cx) {
                 Poll::Ready(x) => x,
                 Poll::Pending => return Poll::Pending,
@@ -229,21 +234,27 @@ impl MatrixClient {
                             .insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
                     }
 
+                    assert!(Some(sync_response.next_batch.clone()) != self.next_token);
+                    self.next_token = Some(sync_response.next_batch.clone());
+
                     Poll::Ready(Some(Ok(sync_response)))
                 } else {
-                    unreachable!()
+                    Poll::Ready(None)
                 }
             } else {
                 Poll::Ready(None)
             }
         } else {
+            debug!(self.ctx.logger, "stream was none, pending");
+
             self.stream = Some(Box::pin(self.client.sync(
                 None,
-                None,
+                self.next_token.clone(),
                 api::sync::sync_events::SetPresence::Online,
                 None,
             )));
-            self.poll_sync(cx)
+
+            return Poll::Ready(None);
         }
     }
 }
@@ -304,4 +315,3 @@ impl Stream for MatrixClient {
         self.poll_sync(cx)
     }
 }
-

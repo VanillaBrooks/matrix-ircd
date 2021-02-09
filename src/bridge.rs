@@ -292,16 +292,21 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
     pub async fn run(&mut self, ctx: &ConnectionContext) {
         loop {
-            debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
+            debug!(ctx.logger.as_ref(), "Polling irc for changes");
 
             if let Err(e) = self.poll_irc().await {
                 task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                 break;
             }
+
+            debug!(ctx.logger.as_ref(), "Polling matrix for changes");
+
             if let Err(e) = self.poll_matrix().await {
                 task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                 break;
             }
+
+            debug!(ctx.logger.as_ref(), "Finished polling matrix");
         }
     }
 
@@ -313,10 +318,14 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
 
         loop {
+            debug!(self.ctx.logger, "polling irc channels");
+
             let poll_response = match self.irc_conn.as_mut().poll().await? {
                 Poll::Ready(x) => x,
                 Poll::Pending => return Ok(()),
             };
+
+            debug!(self.ctx.logger, "Got an irc repsonse from the poll");
 
             if let Some(line) = poll_response {
                 self.handle_irc_cmd(line).await;
@@ -328,9 +337,21 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
     }
 
     async fn poll_matrix(&mut self) -> Result<(), Error> {
+        debug!(self.ctx.logger, "running poll_matrix");
+
+        let mut i = 0;
+
         while let Some(response) = self.matrix_client.as_mut().next().await {
+            debug!(
+                self.ctx.logger.as_ref(),
+                "fetching another value from matrix"
+            );
             let response = response?;
             self.handle_sync_response(response).await;
+            i += 1;
+            if i > 30 {
+                break;
+            }
         }
         Ok(())
     }
