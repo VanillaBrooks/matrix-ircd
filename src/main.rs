@@ -210,7 +210,7 @@ async fn main() {
                         .await
                         .unwrap();
 
-                bridge.run(&ctx).await;
+                bridge.run().await;
 
                 task_info!(ctx, "Finished");
             };
@@ -225,12 +225,12 @@ async fn main() {
             let spawn_fut = async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
 
-                let mut bridge =
+                let bridge =
                     bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
                         .await
                         .unwrap();
 
-                bridge.run(&ctx).await;
+                bridge.run().await;
             };
 
             tokio::spawn(spawn_fut);

@@ -40,21 +40,25 @@ use url::Url;
 
 use ruma_client::identifiers::{RoomId, RoomIdOrAliasId};
 
+use tokio::sync::RwLock;
+use std::sync::Arc;
+
+
 /// Bridges a single IRC connection with a matrix session.
 ///
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
-pub struct Bridge<IS: AsyncRead + AsyncWrite + Send + 'static> {
-    irc_conn: Pin<Box<IrcUserConnection<IS>>>,
-    matrix_client: Pin<Box<MatrixClient>>,
-    ctx: ConnectionContext,
-    closed: bool,
-    mappings: MappingStore,
-    is_first_sync: bool,
-    joining_map: BTreeMap<RoomId, String>,
+pub struct Bridge<IS: AsyncRead + AsyncWrite + Send + Sync + 'static> {
+    irc_conn: Arc<RwLock<Pin<Box<IrcUserConnection<IS>>>>>,
+    matrix_client: Arc<RwLock<Pin<Box<MatrixClient>>>>,
+    ctx: Arc<ConnectionContext>,
+    closed: Arc<RwLock<bool>>,
+    mappings: Arc<RwLock<MappingStore>>,
+    is_first_sync: Arc<RwLock<bool>>,
+    joining_map: Arc<RwLock<BTreeMap<RoomId, String>>>,
 }
 
-impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite + 'static + Send + Sync > Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
     ///
@@ -101,13 +105,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {
-            irc_conn: Box::pin(irc_conn),
-            matrix_client: Box::pin(matrix_client),
-            ctx,
-            closed: false,
-            mappings: MappingStore::default(),
-            is_first_sync: true,
-            joining_map: BTreeMap::new(),
+            irc_conn: Arc::new(RwLock::new(Box::pin(irc_conn))),
+            matrix_client: Arc::new(RwLock::new(Box::pin(matrix_client))),
+            ctx: Arc::new(ctx),
+            closed: Arc::new(RwLock::new(false)),
+            mappings: Arc::new(RwLock::new(MappingStore::default())),
+            is_first_sync: Arc::new(RwLock::new(true)),
+            joining_map: Arc::new(RwLock::new(BTreeMap::new())),
         };
 
         let Bridge {
@@ -116,23 +120,29 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             ref matrix_client,
             ..
         } = bridge;
-        let own_nick = irc_conn.nick.clone();
-        let own_user_id = matrix_client.get_user_id().to_string();
-        mappings.insert_nick(irc_conn, own_nick, own_user_id);
+
+        // Need to enclose thei
+        {
+            let mut write_irc_conn = irc_conn.write().await;
+        
+            let own_nick = write_irc_conn.nick.clone();
+            let own_user_id = matrix_client.read().await.get_user_id().to_string();
+            mappings.write().await.insert_nick(&mut write_irc_conn, own_nick, own_user_id);
+        }
 
         Ok(bridge)
     }
 
-    async fn handle_irc_cmd(&mut self, line: IrcCommand) {
+    async fn handle_irc_cmd(&self, line: IrcCommand) {
         debug!(self.ctx.logger, "Received IRC line"; "command" => line.command());
 
         match line {
             IrcCommand::PrivMsg { channel, text } => {
-                if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
+                if let Some(room_id) = self.mappings.write().await.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_ref());
 
                     if self
-                        .matrix_client
+                        .matrix_client.write().await
                         .send_text_message(room_id.clone(), text)
                         .await
                         .is_err()
@@ -153,7 +163,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
                 let room = RoomIdOrAliasId::try_from(channel.clone()).unwrap();
 
-                let join_future = if let Ok(response) = self.matrix_client.join_room(room).await {
+                let join_future = if let Ok(response) = self.matrix_client.write().await.join_room(room).await {
                     response
                 } else {
                     // TODO: log this
@@ -164,7 +174,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
                 task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.as_ref());
 
-                if let Some(mapped_channel) = self.mappings.room_id_to_channel(&room_id) {
+                if let Some(mapped_channel) = self.mappings.write().await.room_id_to_channel(&room_id) {
                     if mapped_channel == &channel {
                         // We've already joined this channel, most likely we got the sync
                         // response before the joined response.
@@ -173,13 +183,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                     } else {
                         // We respond to the join with a redirect!
                         task_trace!(self.ctx, "Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
-                        self.irc_conn
+                        self.irc_conn.write().await
                             .write_redirect_join(&channel, mapped_channel)
                             .await;
                     }
                 } else {
                     task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.as_ref());
-                    self.joining_map.insert(room_id, channel);
+                    self.joining_map.write().await.insert(room_id, channel);
                 };
             }
             // TODO: Handle PART
@@ -189,39 +199,43 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    async fn handle_sync_response(&mut self, sync_response: SyncResponse) {
+    async fn handle_sync_response(&self, sync_response: SyncResponse) {
+    
         trace!(self.ctx.logger, "Received sync response"; "batch" => sync_response.next_batch);
 
-        if self.is_first_sync {
+        if *self.is_first_sync.read().await {
+            let mut irc_conn = self.irc_conn.write().await;
+
             info!(self.ctx.logger, "Received initial sync response");
 
-            self.irc_conn.welcome().await;
-            self.irc_conn.send_ping("HELLO").await;
+            irc_conn.welcome().await;
+            irc_conn.send_ping("HELLO").await;
         }
 
         for (room_id, sync) in &sync_response.rooms.join {
             self.handle_room_sync(room_id, &sync).await;
         }
 
-        if self.is_first_sync {
+        let mut first_sync = self.is_first_sync.write().await;
+        if *first_sync {
             info!(self.ctx.logger, "Finished processing initial sync response");
-            self.is_first_sync = false;
+            *first_sync = false;
         }
     }
 
-    async fn handle_room_sync(&mut self, room_id: &RoomId, sync: &JoinedRoomSyncResponse) {
-        let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
-            self.mappings
-                .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
+    async fn handle_room_sync(&self, room_id: &RoomId, sync: &JoinedRoomSyncResponse) {
+        let (channel, new) = if let Some(room) = self.matrix_client.read().await.get_room(room_id) {
+            self.mappings.write().await
+                .create_or_get_channel_name_from_matrix(&mut *self.irc_conn.write().await, room)
                 .await
         } else {
             warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id.as_ref());
             return;
         };
 
-        if let Some(attempt_channel) = self.joining_map.remove(room_id) {
+        if let Some(attempt_channel) = self.joining_map.write().await.remove(room_id) {
             if attempt_channel != channel {
-                self.irc_conn
+                self.irc_conn.write().await
                     .write_redirect_join(&attempt_channel, &channel)
                     .await;
             }
@@ -229,7 +243,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
         for ev in &sync.timeline.events {
             if ev.etype == "m.room.message" {
-                let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
+                let mappings = self.mappings.read().await;
+                let sender_nick = match mappings.get_nick_from_matrix(&ev.sender) {
                     Some(x) => x,
                     None => {
                         warn!(self.ctx.logger, "Sender not in room"; "room" => room_id.as_ref(), "sender" => &ev.sender[..]);
@@ -252,20 +267,20 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                 };
                 match msgtype {
                     "m.text" => {
-                        self.irc_conn
+                        self.irc_conn.write().await
                             .send_message(&channel, sender_nick, body)
                             .await
                     }
-                    "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body).await,
+                    "m.emote" => self.irc_conn.write().await.send_action(&channel, sender_nick, body).await,
                     "m.image" | "m.file" | "m.video" | "m.audio" => {
                         let url = ev.content.get("url").and_then(Value::as_str);
                         match url {
                             Some(url) => {
-                                self.irc_conn
+                                self.irc_conn.write().await
                                     .send_message(
                                         &channel,
                                         sender_nick,
-                                        self.matrix_client.media_url(&url).as_str(),
+                                        self.matrix_client.read().await.media_url(&url).as_str(),
                                     )
                                     .await
                             }
@@ -277,7 +292,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                     }
                     _ => {
                         warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id.as_ref(), "msgtype" => msgtype);
-                        self.irc_conn
+                        self.irc_conn.write().await
                             .send_message(&channel, sender_nick, body)
                             .await;
                     }
@@ -290,37 +305,49 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn run(&mut self, ctx: &ConnectionContext) {
+    pub async fn run(&self) {
+
+        let mut irc : Bridge<IS> = self.clone();
+        let irc_fut= async move {
+            loop {
+                if let Err(e) = irc.poll_irc().await {
+                    task_warn!(irc.ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                    break;
+                }
+            }
+        };
+
+        tokio::spawn(irc_fut);
+
+        let matrix = self.clone();
+
+        let matrix_fut = async move{ 
+
         loop {
-            debug!(ctx.logger.as_ref(), "Polling irc for changes");
+            debug!(matrix.ctx.logger.as_ref(), "Polling matrix for changes");
 
-            if let Err(e) = self.poll_irc().await {
-                task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+            if let Err(e) = matrix.poll_matrix().await {
+                task_warn!(matrix.ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                 break;
             }
 
-            debug!(ctx.logger.as_ref(), "Polling matrix for changes");
-
-            if let Err(e) = self.poll_matrix().await {
-                task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                break;
-            }
-
-            debug!(ctx.logger.as_ref(), "Finished polling matrix");
         }
+        };
+        tokio::spawn(matrix_fut);
+        
     }
 
-    async fn poll_irc(&mut self) -> Result<(), io::Error> {
+    async fn poll_irc(&self) -> Result<(), io::Error> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
-        if self.is_first_sync {
+        if *self.is_first_sync.read().await {
             return Ok(());
         }
 
         loop {
             debug!(self.ctx.logger, "polling irc channels");
 
-            let poll_response = match self.irc_conn.as_mut().poll().await? {
+            let poll_response = match self.irc_conn.write().await.as_mut().poll().await? {
                 Poll::Ready(x) => x,
                 Poll::Pending => return Ok(()),
             };
@@ -330,18 +357,18 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             if let Some(line) = poll_response {
                 self.handle_irc_cmd(line).await;
             } else {
-                self.closed = true;
+                *self.closed.write().await = true;
                 return Ok(());
             }
         }
     }
 
-    async fn poll_matrix(&mut self) -> Result<(), Error> {
+    async fn poll_matrix(&self) -> Result<(), Error> {
         debug!(self.ctx.logger, "running poll_matrix");
 
         let mut i = 0;
 
-        while let Some(response) = self.matrix_client.as_mut().next().await {
+        while let Some(response) = self.matrix_client.write().await.as_mut().next().await {
             debug!(
                 self.ctx.logger.as_ref(),
                 "fetching another value from matrix"
@@ -354,6 +381,18 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             }
         }
         Ok(())
+    }
+
+    fn clone(&self) -> Self {
+        Bridge {
+            irc_conn: self.irc_conn.clone(),
+            matrix_client: self.matrix_client.clone(),
+            ctx: self.ctx.clone(),
+            closed: self.closed.clone(),
+            mappings: self.mappings.clone(),
+            is_first_sync: self.is_first_sync.clone(),
+            joining_map: self.joining_map.clone()
+        }
     }
 }
 
